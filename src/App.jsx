@@ -20,13 +20,14 @@ import {
 
 // --- FIREBASE INITIALIZATION ---
 // PENTING: Ganti config ini dengan milik Anda di Firebase Console
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "ISI_API_KEY_ANDA",
-  authDomain: "ISI_DOMAIN_ANDA",
-  projectId: "ISI_PROJECT_ID_ANDA",
-  storageBucket: "ISI_STORAGE_BUCKET_ANDA",
-  messagingSenderId: "ISI_SENDER_ID_ANDA",
-  appId: "ISI_APP_ID_ANDA"
+const firebaseConfig = {
+  apiKey: "AIzaSyDAbWuN37Y_9H3nsFI1KKifhXVSOtgXXSU",
+  authDomain: "fincatat.firebaseapp.com",
+  projectId: "fincatat",
+  storageBucket: "fincatat.firebasestorage.app",
+  messagingSenderId: "162007230800",
+  appId: "1:162007230800:web:df8f4a4b44ece741b0e455",
+  measurementId: "G-5158WYVV3E"
 };
 
 const app = initializeApp(firebaseConfig);
