@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE INITIALIZATION ---
-// Ganti config ini dengan milik Anda di Firebase Console
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "ISI_API_KEY_ANDA",
   authDomain: "ISI_DOMAIN_ANDA",
@@ -56,7 +55,7 @@ const App = () => {
   const [appData, setAppData] = useState(null);
   const [activeScreen, setActiveScreen] = useState('home'); 
   
-  // Auth & UI States
+  // Auth States
   const [authMode, setAuthMode] = useState('login'); 
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
   const [authError, setAuthError] = useState('');
@@ -65,7 +64,7 @@ const App = () => {
   // PIN Security States
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [enteredPin, setEnteredPin] = useState('');
-  const [pinSetupStep, setPinSetupStep] = useState(0); // 0: input, 1: setup new, 2: confirm new
+  const [pinSetupStep, setPinSetupStep] = useState(0); 
   const [tempPin, setTempPin] = useState('');
   const [pinError, setPinError] = useState(false);
 
@@ -79,10 +78,10 @@ const App = () => {
   const [formData, setFormData] = useState({ amount: '', title: '', category: 'Lainnya' });
   const [transferData, setTransferData] = useState({ bank: 'BCA', account: '', amount: '' });
   const [isBankDropdownOpen, setIsBankDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
   const [historyFilter, setHistoryFilter] = useState('all');
   const [editBudgetModal, setEditBudgetModal] = useState({ isOpen: false, category: '', limit: '' });
 
-  // --- AUTH INITIALIZATION ---
   useEffect(() => {
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -95,7 +94,6 @@ const App = () => {
       if (!u) {
         setIsLoading(false);
         setIsUnlocked(false);
-        setEnteredPin('');
       }
     });
     const hr = new Date().getHours();
@@ -103,7 +101,6 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // --- FIRESTORE SYNC ---
   useEffect(() => {
     if (!user) return;
     const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'finances', 'mainData');
@@ -111,7 +108,7 @@ const App = () => {
       if (snap.exists()) {
         const data = snap.data();
         setAppData(data);
-        if (!data.pin) setPinSetupStep(1); // Minta buat PIN jika baru daftar
+        if (!data.pin) setPinSetupStep(1); 
       } else {
         const init = { ...DEFAULT_DATA, profile: { name: authForm.name || 'Pengguna Baru' } };
         setDoc(docRef, init);
@@ -123,14 +120,23 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // --- CORE ACTIONS ---
   const handleAuth = async (e) => {
     e.preventDefault(); setIsSubmitting(true); setAuthError('');
     try {
-      if (authMode === 'register') await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
-      else await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
-    } catch (err) { setAuthError('Email atau Password salah atau sudah terdaftar'); }
-    finally { setIsSubmitting(false); }
+      if (authMode === 'register') {
+        await createUserWithEmailAndPassword(auth, authForm.email, authForm.password);
+      } else {
+        await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
+      }
+    } catch (err) {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setAuthError('Email atau Password salah.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setAuthError('Email ini sudah terdaftar. Silakan login.');
+      } else {
+        setAuthError('Gagal masuk. Cek koneksi Anda.');
+      }
+    } finally { setIsSubmitting(false); }
   };
 
   const updateFirestore = async (fields) => {
@@ -142,25 +148,23 @@ const App = () => {
   const handlePinInput = (num) => {
     if (enteredPin.length < 6) {
       const p = enteredPin + num; setEnteredPin(p);
-      if (p.length === 6) {
-        setTimeout(() => {
-          if (pinSetupStep === 0) {
-            if (p === appData.pin) { setIsUnlocked(true); setEnteredPin(''); }
-            else { setPinError(true); setTimeout(() => { setPinError(false); setEnteredPin(''); }, 500); }
-          } else if (pinSetupStep === 1) { 
-            setTempPin(p); setEnteredPin(''); setPinSetupStep(2); 
-          } else if (pinSetupStep === 2) {
-            if (p === tempPin) { 
-              updateFirestore({ pin: p }); 
-              setIsUnlocked(true); setPinSetupStep(0); setEnteredPin(''); 
-              triggerSuccess('PIN Berhasil Disimpan');
-            } else { 
-              setPinError(true); 
-              setTimeout(() => { setPinError(false); setEnteredPin(''); setTempPin(''); setPinSetupStep(1); }, 500); 
-            }
+      if (p.length === 6) setTimeout(() => {
+        if (pinSetupStep === 0) {
+          if (p === appData.pin) { setIsUnlocked(true); setEnteredPin(''); }
+          else { setPinError(true); setTimeout(() => { setPinError(false); setEnteredPin(''); }, 500); }
+        } else if (pinSetupStep === 1) { 
+          setTempPin(p); setEnteredPin(''); setPinSetupStep(2); 
+        } else if (pinSetupStep === 2) {
+          if (p === tempPin) { 
+            updateFirestore({ pin: p }); 
+            setIsUnlocked(true); setPinSetupStep(0); setEnteredPin(''); 
+            triggerSuccess('PIN Berhasil Disimpan');
+          } else { 
+            setPinError(true); 
+            setTimeout(() => { setPinError(false); setEnteredPin(''); setTempPin(''); setPinSetupStep(1); }, 500); 
           }
-        }, 200);
-      }
+        }
+      }, 200);
     }
   };
 
@@ -188,7 +192,7 @@ const App = () => {
     setIsSubmitting(false); triggerSuccess('Tagihan Dibayar!', 'home');
   };
 
-  // --- SCREENS ---
+  // --- UI COMPONENTS ---
   const PageHeader = ({ title }) => (
     <div className="flex items-center gap-4 text-white mb-8 pt-4 sticky top-0 z-20 animate-slide-right">
       <button onClick={() => setActiveScreen('home')} className="p-2 bg-white/20 rounded-xl backdrop-blur-sm hover:bg-white/30 transition-all"><ArrowLeft size={24} /></button>
@@ -212,7 +216,7 @@ const App = () => {
             )}
             <div className="relative"><Mail className="absolute left-4 top-4 text-slate-300"/><input type="email" required placeholder="Email Anda" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-5 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" /></div>
             <div className="relative"><KeyRound className="absolute left-4 top-4 text-slate-300"/><input type={showPassword ? "text" : "password"} required placeholder="Kata Sandi" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-12 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" /><button type="button" onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-slate-300">{showPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button></div>
-            {authError && <div className="text-red-500 text-xs font-bold px-2 animate-shake">{authError}</div>}
+            {authError && <div className="bg-red-50 text-red-500 text-[10px] font-bold py-2 px-3 rounded-lg border border-red-100 animate-shake">{authError}</div>}
             <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-[#20b2aa] hover:bg-[#1b9a94] text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{isSubmitting ? <Loader2 className="animate-spin" /> : (authMode === 'login' ? 'Masuk' : 'Daftar')}</button>
           </form>
           <div className="mt-10 text-center"><p className="text-slate-400 text-sm">{authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}</p><button onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('');}} className="mt-2 text-[#20b2aa] font-black text-lg">{authMode === 'login' ? 'Daftar Gratis' : 'Login Sekarang'}</button></div>
@@ -289,7 +293,6 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: FORM IN & OUT */}
             {(activeScreen === 'form_in' || activeScreen === 'form_out') && (
               <div className="animate-fade-in-up">
                 <PageHeader title={activeScreen === 'form_in' ? "Tambah Pemasukan" : "Tambah Pengeluaran"} />
@@ -318,7 +321,36 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: ANGGARAN */}
+            {activeScreen === 'transfer' && (
+              <div className="animate-fade-in-up">
+                <PageHeader title="Transfer Dana" />
+                <div className="bg-white p-6 rounded-[32px] shadow-xl space-y-6">
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Pilih Bank</label>
+                    <div className="relative" ref={dropdownRef}>
+                      <button onClick={() => setIsBankDropdownOpen(!isBankDropdownOpen)} className="w-full text-left py-3 border-b border-slate-100 font-bold flex justify-between items-center uppercase">{transferData.bank} <ChevronDown size={20}/></button>
+                      {isBankDropdownOpen && (
+                        <div className="absolute top-full left-0 right-0 bg-white border rounded-xl shadow-2xl z-50 max-h-40 overflow-y-auto">
+                          {["BCA", "Mandiri", "BNI", "BRI", "Gopay", "OVO", "Dana"].map(b => (
+                            <button key={b} onClick={()=>{setTransferData({...transferData, bank:b}); setIsBankDropdownOpen(false);}} className="w-full text-left p-3 hover:bg-slate-50 font-bold border-b uppercase">{b}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">No. Rekening</label>
+                    <input type="number" placeholder="0000000000" value={transferData.account} onChange={e=>setTransferData({...transferData, account:e.target.value})} className="w-full text-lg border-b border-slate-100 outline-none py-3 font-bold text-slate-700"/>
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Nominal (Rp)</label>
+                    <input type="number" placeholder="0" value={transferData.amount} onChange={e=>setTransferData({...transferData, amount:e.target.value})} className="w-full text-3xl font-black border-b-2 border-blue-100 text-blue-500 outline-none py-4 bg-transparent"/>
+                  </div>
+                  <button onClick={()=>handleSaveTx('out')} disabled={isSubmitting} className="w-full py-5 bg-blue-500 text-white rounded-3xl font-black shadow-lg shadow-blue-200 active:scale-95 transition-all flex items-center justify-center gap-2">Kirim Dana</button>
+                </div>
+              </div>
+            )}
+
             {activeScreen === 'budget' && (
               <div className="animate-fade-in-up">
                 <PageHeader title="Anggaran Bulanan" />
@@ -343,7 +375,6 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: HISTORY */}
             {activeScreen === 'history' && (
               <div className="animate-fade-in-up">
                 <PageHeader title="Riwayat" />
@@ -367,7 +398,6 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: SETTINGS */}
             {activeScreen === 'settings' && (
               <div className="animate-fade-in-up">
                 <PageHeader title="Profil Saya" />
@@ -379,7 +409,7 @@ const App = () => {
                   <button onClick={()=>setActiveScreen('bank_accounts')} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><Landmark size={20} className="text-[#20b2aa]"/> Rekening Bank</button>
                   
                   {/* TOMBOL GANTI PIN */}
-                  <button onClick={()=>{setPinSetupStep(1); setIsUnlocked(false);}} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><KeyRound size={20} className="text-[#20b2aa]"/> Ganti PIN Keamanan</button>
+                  <button onClick={()=>{setPinSetupStep(1); setIsUnlocked(false); setEnteredPin('');}} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><KeyRound size={20} className="text-[#20b2aa]"/> Ganti PIN Keamanan</button>
                   
                   <button onClick={()=>setActiveScreen('help_report')} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><Phone size={20} className="text-[#20b2aa]"/> Bantuan & Laporan</button>
                   
@@ -390,13 +420,21 @@ const App = () => {
                 </div>
               </div>
             )}
+            
+            {activeScreen === 'bills' && <div className="animate-fade-in-up"><PageHeader title="Tagihan"/><div className="space-y-4">{(appData?.bills || []).map(b=>(<div key={b.id} className="bg-white p-5 rounded-2xl flex justify-between shadow-md"><div><p className="font-bold">{b.name}</p><p className="text-xs text-slate-400">{formatIDR(b.amount)}</p></div><button onClick={()=>handlePayBill(b)} className="px-4 py-1.5 bg-[#20b2aa] text-white text-xs font-bold rounded-lg">Bayar</button></div>))}</div></div>}
+            {activeScreen === 'savings' && <div className="animate-fade-in-up"><PageHeader title="Tabungan"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4">{(appData?.savingsGoals || []).map(g => (<div key={g.id} className="space-y-2"><div className="flex justify-between font-bold"><span>{g.name}</span><span>{formatIDR(g.current)}</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-pink-400" style={{width: `${(g.current/g.target)*100}%`}}></div></div></div>))}</div></div>}
+            {activeScreen === 'stats' && <div className="animate-fade-in-up"><PageHeader title="Statistik"/><div className="bg-white p-6 rounded-3xl shadow-xl"><h4 className="font-bold mb-4 uppercase text-xs text-slate-400 tracking-widest">Pengeluaran Total</h4><div className="text-4xl font-black text-slate-800 mb-2">{formatIDR(totalOut)}</div></div></div>}
+            {activeScreen === 'categories' && <div className="animate-fade-in-up"><PageHeader title="Kategori"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4"><div><p className="font-black text-xs text-slate-400 uppercase mb-2">Pengeluaran</p><div className="flex flex-wrap gap-2">{appData?.categories.out.map(c=>(<span key={c} className="px-3 py-1 bg-red-50 text-red-500 rounded-lg text-xs font-bold">{c}</span>))}</div></div></div></div>}
+            {activeScreen === 'bank_accounts' && <div className="animate-fade-in-up"><PageHeader title="Rekening"/><div className="space-y-4">{(appData?.bankAccounts || []).map(b=>(<div key={b.id} className="bg-white p-4 rounded-xl shadow flex items-center gap-3"><Landmark className="text-blue-500"/><div><p className="font-bold">{b.bank}</p><p className="text-xs">{b.accountNumber}</p></div></div>))}<button className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl font-bold text-slate-400">+ Rekening Baru</button></div></div>}
+            {activeScreen === 'help_report' && <div className="animate-fade-in-up"><PageHeader title="Bantuan"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4"><div className="flex items-center gap-4 p-4 bg-green-50 rounded-2xl"><MessageCircle className="text-green-500"/><div><p className="font-bold">WhatsApp Support</p><p className="text-xs text-slate-400">Respon dalam 5 menit</p></div></div><div className="flex items-center gap-4 p-4 bg-blue-50 rounded-2xl"><Mail className="text-blue-500"/><div><p className="font-bold">Email Kami</p><p className="text-xs text-slate-400">support@fincatat.com</p></div></div></div></div>}
+
           </div>
 
-          {/* BOTTOM NAVIGATION TETAP */}
           <div className="w-full h-20 bg-white/90 backdrop-blur-md rounded-t-[30px] shadow-[0_-10px_25px_rgba(0,0,0,0.05)] flex justify-between items-end px-4 pb-2 z-50 border-t border-white shrink-0">
             {[
               { id: 'home', icon: <Home size={24}/>, label: 'HOME' },
               { id: 'history', icon: <History size={24}/>, label: 'RIWAYAT' },
+              { id: 'stats', icon: <PieChart size={24}/>, label: 'STATISTIK' },
               { id: 'settings', icon: <User size={24}/>, label: 'AKUN' }
             ].map(nav => (
               <div key={nav.id} onClick={() => setActiveScreen(nav.id)} className={`flex flex-col items-center justify-center cursor-pointer transition-all duration-500 ${activeScreen === nav.id ? 'w-[75px] h-[85px] bg-[#1d2333] text-white rounded-t-[28px] shadow-2xl -translate-y-2' : 'w-16 h-16 text-slate-400 mb-2'}`}>
@@ -409,9 +447,20 @@ const App = () => {
     );
   };
 
-  // --- MODALS ---
-  const Modals = () => (
-    <>
+  return (
+    <div className="min-h-screen bg-slate-900 flex justify-center selection:bg-[#20b2aa] selection:text-white font-sans">
+      <style>{`
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes popIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes slideRight { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+        .animate-fade-in-up { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-pop-in { animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        .animate-slide-right { animation: slideRight 0.5s ease-out forwards; }
+        .animate-shake { animation: shake 0.4s ease-in-out; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+      `}</style>
+      
       {showSuccess && <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-max bg-slate-800/95 text-white px-6 py-4 rounded-full font-bold flex items-center gap-3 shadow-2xl z-[500] animate-pop-in"><CheckCircle2 className="text-emerald-400" size={20}/>{successMsg}</div>}
       
       {editBudgetModal.isOpen && (
@@ -438,27 +487,12 @@ const App = () => {
            </div>
         </div>
       )}
-    </>
-  );
 
-  if (isLoading) return <div className="fixed inset-0 bg-[#f2f6fa] flex flex-col items-center justify-center gap-4 text-[#20b2aa] z-[600]"><Loader2 className="animate-spin" size={48} /><p className="font-black text-xs animate-pulse uppercase tracking-widest">Sinkronisasi Cloud...</p></div>;
-  
-  return (
-    <div className="min-h-screen bg-slate-900 flex justify-center selection:bg-[#20b2aa] selection:text-white font-sans">
-      <style>{`
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes popIn { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
-        @keyframes slideRight { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
-        .animate-fade-in-up { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .animate-pop-in { animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        .animate-slide-right { animation: slideRight 0.5s ease-out forwards; }
-        .animate-shake { animation: shake 0.4s ease-in-out; }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-      `}</style>
-      
-      {!user ? renderAuth() : renderApp()}
-      <Modals />
+      {isLoading ? (
+        <div className="fixed inset-0 bg-[#f2f6fa] flex flex-col items-center justify-center gap-4 text-[#20b2aa] z-[600]"><Loader2 className="animate-spin" size={48} /><p className="font-black text-xs animate-pulse uppercase tracking-widest">Sinkronisasi Cloud...</p></div>
+      ) : (
+        !user ? renderAuth() : renderApp()
+      )}
     </div>
   );
 };
