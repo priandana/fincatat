@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 
 // --- FIREBASE INITIALIZATION ---
-// PENTING: Ganti config ini dengan milik Anda di Firebase Console
+// Ambil data ini dari Firebase Console > Project Settings > Your Apps > Config
 const firebaseConfig = {
   apiKey: "AIzaSyDAbWuN37Y_9H3nsFI1KKifhXVSOtgXXSU",
   authDomain: "fincatat.firebaseapp.com",
@@ -33,8 +33,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// Gunakan ID tetap agar data tidak hilang saat pindah perangkat
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'fincatat-app-prod-v1';
+const appId = 'fincatat-pro-enterprise-v1';
 
 const DEFAULT_DATA = {
   pin: null, 
@@ -58,20 +57,18 @@ const App = () => {
   const [appData, setAppData] = useState(null);
   const [activeScreen, setActiveScreen] = useState('home'); 
   
-  // Auth & UI States
+  // Auth & PIN States
   const [authMode, setAuthMode] = useState('login'); 
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' });
   const [authError, setAuthError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  
-  // PIN Security States
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [enteredPin, setEnteredPin] = useState('');
   const [pinSetupStep, setPinSetupStep] = useState(0); 
   const [tempPin, setTempPin] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  // General UI States
+  // UI States
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, isDanger: false });
@@ -87,12 +84,6 @@ const App = () => {
 
   // --- AUTH INITIALIZATION ---
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        try { await signInWithCustomToken(auth, __initial_auth_token); } catch (e) {}
-      }
-    };
-    initAuth();
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       if (!u) {
@@ -113,6 +104,7 @@ const App = () => {
     const unsubscribe = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
+        if (!data.budgetLimits) data.budgetLimits = {};
         setAppData(data);
         if (!data.pin) setPinSetupStep(1); 
       } else {
@@ -129,7 +121,7 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // --- CORE ACTIONS ---
+  // --- AUTH ACTIONS ---
   const handleAuth = async (e) => {
     e.preventDefault(); 
     setIsSubmitting(true); 
@@ -141,19 +133,16 @@ const App = () => {
         await signInWithEmailAndPassword(auth, authForm.email, authForm.password);
       }
     } catch (err) {
-      console.error("Firebase Auth Error:", err.code, err.message);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
         setAuthError('Email atau Password salah.');
       } else if (err.code === 'auth/email-already-in-use') {
-        setAuthError('Email ini sudah terdaftar. Silakan login.');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setAuthError('Error: Aktifkan "Email/Password" di Firebase Console!');
+        setAuthError('Email ini sudah terdaftar.');
+      } else if (err.code === 'auth/api-key-not-valid') {
+        setAuthError('Konfigurasi Firebase (API Key) salah. Periksa file App.jsx!');
       } else {
-        setAuthError(`Error: ${err.code}. Cek izin Firebase Anda.`);
+        setAuthError(`Terjadi kesalahan: ${err.code}`);
       }
-    } finally { 
-      setIsSubmitting(false); 
-    }
+    } finally { setIsSubmitting(false); }
   };
 
   const updateFirestore = async (fields) => {
@@ -201,8 +190,7 @@ const App = () => {
     const nt = { id: Date.now(), type, amount: parseInt(formData.amount), title: formData.title, category: formData.category, date: new Date().toISOString().split('T')[0] };
     await updateFirestore({ transactions: [nt, ...(appData?.transactions || [])] });
     setFormData({ amount: '', title: '', category: appData?.categories[type][0] || 'Lainnya' });
-    setIsSubmitting(false); 
-    triggerSuccess('Transaksi Tersimpan!', 'home');
+    setIsSubmitting(false); triggerSuccess('Tersimpan!', 'home');
   };
 
   const handlePayBill = async (bill) => {
@@ -210,8 +198,24 @@ const App = () => {
     const nt = { id: Date.now(), type: 'out', amount: bill.amount, title: `Bayar: ${bill.name}`, category: 'Tagihan', date: new Date().toISOString().split('T')[0] };
     const ub = appData.bills.map(b => b.id === bill.id ? { ...b, isPaid: true } : b);
     await updateFirestore({ transactions: [nt, ...appData.transactions], bills: ub });
-    setIsSubmitting(false); 
-    triggerSuccess('Tagihan Lunas!', 'home');
+    setIsSubmitting(false); triggerSuccess('Tagihan Lunas!', 'home');
+  };
+
+  const handleDeleteTx = (id) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Transaksi',
+      message: 'Hapus data ini secara permanen?',
+      isDanger: true,
+      onConfirm: async () => {
+        setIsSubmitting(true);
+        const filtered = appData.transactions.filter(t => t.id !== id);
+        await updateFirestore({ transactions: filtered });
+        setIsSubmitting(false);
+        setConfirmModal({ ...confirmModal, isOpen: false });
+        triggerSuccess('Transaksi Dihapus');
+      }
+    });
   };
 
   // --- UI COMPONENTS ---
@@ -234,31 +238,14 @@ const App = () => {
           </div>
           <form onSubmit={handleAuth} className="space-y-5">
             {authMode === 'register' && (
-              <div className="relative group">
-                <User className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/>
-                <input type="text" required placeholder="Nama Lengkap" value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-5 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" />
-              </div>
+              <div className="relative group"><User className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/><input type="text" required placeholder="Nama Lengkap" value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-5 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" /></div>
             )}
-            <div className="relative group">
-              <Mail className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/>
-              <input type="email" required placeholder="Email Anda" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-5 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" />
-            </div>
-            <div className="relative group">
-              <KeyRound className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/>
-              <input type={showPassword ? "text" : "password"} required placeholder="Kata Sandi" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-12 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" />
-              <button type="button" onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-slate-300">{showPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
-            </div>
+            <div className="relative group"><Mail className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/><input type="email" required placeholder="Email Anda" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-5 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" /></div>
+            <div className="relative group"><KeyRound className="absolute left-4 top-4 text-slate-300 group-focus-within:text-[#20b2aa] transition-colors"/><input type={showPassword ? "text" : "password"} required placeholder="Kata Sandi" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className="w-full bg-[#f8fafc] rounded-2xl py-4 pl-12 pr-12 outline-none focus:border-[#20b2aa] border-2 border-transparent transition-all font-bold" /><button type="button" onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-slate-300">{showPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button></div>
             {authError && <div className="bg-red-50 text-red-500 text-[11px] font-black py-3 px-4 rounded-xl border border-red-100 animate-shake flex items-center gap-2"><AlertCircle size={14}/> {authError}</div>}
-            <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-[#20b2aa] hover:bg-[#1b9a94] text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-              {isSubmitting ? <Loader2 className="animate-spin" /> : (authMode === 'login' ? 'Masuk Sekarang' : 'Daftar Akun')}
-            </button>
+            <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-[#20b2aa] hover:bg-[#1b9a94] text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{isSubmitting ? <Loader2 className="animate-spin" /> : (authMode === 'login' ? 'Masuk Sekarang' : 'Daftar Akun')}</button>
           </form>
-          <div className="mt-10 text-center">
-            <p className="text-slate-400 text-sm font-medium">{authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}</p>
-            <button onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('');}} className="mt-2 text-[#20b2aa] font-black text-lg hover:scale-105 transition-transform">
-              {authMode === 'login' ? 'Daftar Gratis Di Sini' : 'Login ke Akun Anda'}
-            </button>
-          </div>
+          <div className="mt-10 text-center"><p className="text-slate-400 text-sm font-medium">{authMode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}</p><button onClick={() => {setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError('');}} className="mt-2 text-[#20b2aa] font-black text-lg hover:scale-105 transition-transform">{authMode === 'login' ? 'Daftar Gratis Di Sini' : 'Login ke Akun Anda'}</button></div>
         </div>
       </div>
     </div>
@@ -295,13 +282,13 @@ const App = () => {
       <div className="fixed inset-0 flex justify-center bg-slate-900 overflow-hidden">
         <div className="w-full max-w-md bg-[#f2f6fa] relative h-full shadow-2xl flex flex-col overflow-hidden">
           
-          {/* FRAME BACKGROUND TETAP */}
+          {/* BACKGROUND TETAP */}
           <div className={`absolute top-0 left-0 right-0 transition-all duration-700 ease-in-out z-0 
             ${(activeScreen === 'home' || activeScreen === 'stats' || activeScreen === 'history') ? 'h-[320px] rounded-b-[50px]' : 'h-[180px] rounded-b-[30px]'} 
             bg-gradient-to-b from-[#20b2aa] to-[#48d1cc]`}>
           </div>
           
-          {/* AREA KONTEN SCROLLABLE */}
+          {/* AREA ISI SCROLLABLE */}
           <div className="flex-1 overflow-y-auto relative z-10 scrollbar-hide pt-12 px-5 pb-24">
             
             {activeScreen === 'home' && (
@@ -310,14 +297,17 @@ const App = () => {
                   <div className="flex items-center gap-3"><Wallet size={28} className="text-white" /><div className="leading-tight"><p className="text-[10px] uppercase font-bold opacity-80">{greeting}</p><h1 className="text-lg font-black">{appData?.profile?.name || 'Pengguna'}</h1></div></div>
                   <div onClick={() => setActiveScreen('settings')} className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 cursor-pointer shadow-lg hover:scale-110 transition-all"><User size={20} className="text-white"/></div>
                 </div>
+                
                 <div className="bg-white/95 backdrop-blur-sm rounded-[32px] p-6 shadow-xl mb-6 flex justify-between items-center transition-all hover:scale-[1.02]">
-                  <div><span className="text-[10px] font-bold text-[#20b2aa] bg-[#e0f7f6] px-2 py-1 rounded-md uppercase tracking-wider">Saldo Tersedia</span><div className="flex items-center gap-3 mt-2"><h2 className="text-3xl font-black text-slate-800">{appData?.showBalance ? formatIDR(totalSaldo) : 'Rp ••••••••'}</h2><button onClick={() => updateFirestore({showBalance: !appData?.showBalance})}>{appData?.showBalance ? <EyeOff size={18} className="text-slate-300"/> : <Eye size={18} className="text-slate-300"/>}</button></div><p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Akun Cloud Aktif</p></div>
+                  <div><span className="text-[10px] font-bold text-[#20b2aa] bg-[#e0f7f6] px-2 py-1 rounded-md uppercase tracking-wider">Saldo Tersedia</span><div className="flex items-center gap-3 mt-2"><h2 className="text-3xl font-black text-slate-800">{appData?.showBalance ? formatIDR(totalSaldo) : 'Rp ••••••••'}</h2><button onClick={() => updateFirestore({showBalance: !appData?.showBalance})}>{appData?.showBalance ? <EyeOff size={18} className="text-slate-300"/> : <Eye size={18} className="text-slate-300"/>}</button></div><p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">Cloud Tersinkronisasi</p></div>
                   <div className="w-14 h-14 rounded-full bg-[#e0f7f6] flex items-center justify-center shadow-inner"><Wallet size={28} className="text-[#20b2aa]" fill="currentColor" /></div>
                 </div>
+
                 <div className="bg-gradient-to-r from-[#ff6b6b] to-[#ff4757] rounded-[32px] p-5 shadow-[0_15px_30px_rgba(255,107,107,0.3)] mb-10 text-white flex items-center gap-5 relative overflow-hidden transition-transform active:scale-95">
                   <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/20 shadow-lg"><TrendingDown size={28} /></div>
                   <div className="z-10"><h3 className="text-lg font-bold">Total Pengeluaran</h3><p className="text-xs text-red-100 mb-1">{appData?.transactions?.filter(t=>t.type==='out').length} Transaksi</p><p className="text-2xl font-black tracking-wider">{appData?.showBalance ? formatIDR(totalOut) : 'Rp ••••••••'}</p></div>
                 </div>
+
                 <div className="grid grid-cols-4 gap-y-6 gap-x-2">
                   {[
                     { icon: <TrendingUp size={24} className="text-emerald-500" />, label: "MASUK", action: 'form_in' },
@@ -338,7 +328,7 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: FORM TRANSACTION */}
+            {/* SCREEN: FORM TRANSAKSI */}
             {(activeScreen === 'form_in' || activeScreen === 'form_out') && (
               <div className="animate-fade-in-up">
                 <PageHeader title={activeScreen === 'form_in' ? "Tambah Pemasukan" : "Tambah Pengeluaran"} />
@@ -349,7 +339,7 @@ const App = () => {
                   </div>
                   <div>
                     <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Keterangan</label>
-                    <input type="text" placeholder="Misal: Gaji / Belanja" value={formData.title} onChange={e=>setFormData({...formData, title: e.target.value})} className="w-full text-lg border-b border-slate-100 outline-none py-3 font-bold text-slate-700"/>
+                    <input type="text" placeholder="Misal: Gaji / Makan Siang" value={formData.title} onChange={e=>setFormData({...formData, title: e.target.value})} className="w-full text-lg border-b border-slate-100 outline-none py-3 font-bold text-slate-700"/>
                   </div>
                   <div>
                     <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Kategori</label>
@@ -392,7 +382,7 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: HISTORY */}
+            {/* SCREEN: RIWAYAT */}
             {activeScreen === 'history' && (
               <div className="animate-fade-in-up">
                 <PageHeader title="Riwayat" />
@@ -408,7 +398,7 @@ const App = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <p className={`font-black ${t.type==='in'?'text-emerald-500':'text-slate-800'}`}>{t.type==='in'?'+':'-'}{formatIDR(t.amount)}</p>
-                        <button onClick={()=>setConfirmModal({isOpen:true, title:'Hapus?', message:'Hapus transaksi ini?', isDanger:true, onConfirm: async ()=>{setIsSubmitting(true); await updateFirestore({transactions: appData.transactions.filter(tx=>tx.id!==t.id)}); setIsSubmitting(false); triggerSuccess('Dihapus!', 'history');}})} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16}/></button>
+                        <button onClick={()=>handleDeleteTx(t.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16}/></button>
                       </div>
                     </div>
                   ))}
@@ -417,7 +407,7 @@ const App = () => {
               </div>
             )}
 
-            {/* SCREEN: SETTINGS */}
+            {/* SCREEN: PENGATURAN */}
             {activeScreen === 'settings' && (
               <div className="animate-fade-in-up">
                 <PageHeader title="Profil Saya" />
@@ -429,7 +419,6 @@ const App = () => {
                   <button onClick={()=>setActiveScreen('bank_accounts')} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><Landmark size={20} className="text-[#20b2aa]"/> Rekening Bank</button>
                   <button onClick={()=>{setPinSetupStep(1); setIsUnlocked(false); setEnteredPin('');}} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><KeyRound size={20} className="text-[#20b2aa]"/> Ganti PIN Keamanan</button>
                   <button onClick={()=>setActiveScreen('help_report')} className="w-full text-left p-4 bg-[#f8fafc] rounded-2xl flex items-center gap-4 font-bold text-slate-600 hover:bg-slate-100 transition-all"><Phone size={20} className="text-[#20b2aa]"/> Bantuan & Laporan</button>
-                  
                   <div className="pt-4 border-t border-slate-50 space-y-3">
                     <button onClick={()=>setIsUnlocked(false)} className="w-full text-left p-4 bg-[#fff1f2] rounded-2xl flex items-center gap-4 font-bold text-red-400 hover:bg-red-100 transition-all"><Lock size={20}/> Kunci Aplikasi</button>
                     <button onClick={() => signOut(auth)} className="w-full text-left p-4 bg-red-50 rounded-2xl flex items-center gap-4 font-black text-red-600 hover:bg-red-600 hover:text-white transition-all"><LogOut size={20}/> Keluar Akun</button>
@@ -438,17 +427,14 @@ const App = () => {
               </div>
             )}
             
-            {/* OTHER FEATURES */}
+            {/* OTHER SCREENS */}
             {activeScreen === 'bills' && <div className="animate-fade-in-up"><PageHeader title="Tagihan"/><div className="space-y-4">{(appData?.bills || []).length === 0 ? <p className="text-center text-white/50 py-10 font-bold">Belum ada tagihan.</p> : (appData?.bills || []).map(b=>(<div key={b.id} className="bg-white p-5 rounded-2xl flex justify-between shadow-md"><div><p className="font-bold">{b.name}</p><p className="text-xs text-slate-400">{formatIDR(b.amount)}</p></div><button onClick={()=>handlePayBill(b)} className="px-4 py-1.5 bg-[#20b2aa] text-white text-xs font-bold rounded-lg">Bayar</button></div>))}</div></div>}
-            {activeScreen === 'savings' && <div className="animate-fade-in-up"><PageHeader title="Tabungan"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4">{(appData?.savingsGoals || []).length === 0 ? <p className="text-center text-slate-300 py-10 font-bold">Belum ada target.</p> : (appData?.savingsGoals || []).map(g => (<div key={g.id} className="space-y-2"><div className="flex justify-between font-bold"><span>{g.name}</span><span>{formatIDR(g.current)}</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-pink-400" style={{width: `${(g.current/g.target)*100}%`}}></div></div></div>))}</div></div>}
-            {activeScreen === 'stats' && <div className="animate-fade-in-up"><PageHeader title="Statistik"/><div className="bg-white p-6 rounded-3xl shadow-xl"><h4 className="font-bold mb-4 uppercase text-xs text-slate-400 tracking-widest text-center">Pengeluaran Total</h4><div className="text-4xl font-black text-slate-800 mb-2 text-center">{formatIDR(totalOut)}</div></div></div>}
-            {activeScreen === 'categories' && <div className="animate-fade-in-up"><PageHeader title="Kategori"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4"><div><p className="font-black text-xs text-slate-400 uppercase mb-4">Pengeluaran</p><div className="flex flex-wrap gap-2">{appData?.categories.out.map(c=>(<span key={c} className="px-3 py-2 bg-red-50 text-red-500 rounded-xl text-xs font-bold border border-red-100">{c}</span>))}</div></div></div></div>}
-            {activeScreen === 'bank_accounts' && <div className="animate-fade-in-up"><PageHeader title="Rekening"/><div className="space-y-4">{(appData?.bankAccounts || []).map(b=>(<div key={b.id} className="bg-white p-4 rounded-xl shadow flex items-center gap-3"><Landmark className="text-blue-500"/><div><p className="font-bold">{b.bank}</p><p className="text-xs">{b.accountNumber}</p></div></div>))}<button className="w-full py-4 border-2 border-dashed border-slate-200 rounded-3xl font-black text-slate-300 hover:text-[#20b2aa] hover:border-[#20b2aa] transition-all">+ Tambah Rekening</button></div></div>}
-            {activeScreen === 'help_report' && <div className="animate-fade-in-up"><PageHeader title="Bantuan"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4"><div className="flex items-center gap-4 p-4 bg-green-50 rounded-2xl hover:bg-green-100 transition-colors cursor-pointer"><MessageCircle className="text-green-500"/><div><p className="font-bold">WhatsApp Support</p><p className="text-xs text-slate-400">Respon dalam 5 menit</p></div></div><div className="flex items-center gap-4 p-4 bg-blue-50 rounded-2xl hover:bg-blue-100 transition-colors cursor-pointer"><Mail className="text-blue-500"/><div><p className="font-bold">Email Kami</p><p className="text-xs text-slate-400">support@fincatat.com</p></div></div></div></div>}
-
+            {activeScreen === 'savings' && <div className="animate-fade-in-up"><PageHeader title="Target Tabungan"/><div className="bg-white p-6 rounded-3xl shadow-xl space-y-4">{(appData?.savingsGoals || []).length === 0 ? <p className="text-center text-slate-300 py-10 font-bold">Belum ada target.</p> : (appData?.savingsGoals || []).map(g => (<div key={g.id} className="space-y-2"><div className="flex justify-between font-bold"><span>{g.name}</span><span>{formatIDR(g.current)}</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-pink-400" style={{width: `${(g.current/g.target)*100}%`}}></div></div></div>))}</div></div>}
+            {activeScreen === 'stats' && <div className="animate-fade-in-up"><PageHeader title="Statistik"/><div className="bg-white p-6 rounded-3xl shadow-xl text-center"><h4 className="font-bold mb-4 uppercase text-xs text-slate-400 tracking-widest">Pengeluaran Total</h4><div className="text-4xl font-black text-slate-800 mb-2">{formatIDR(totalOut)}</div></div></div>}
+            {activeScreen === 'bank_accounts' && <div className="animate-fade-in-up"><PageHeader title="Rekening"/><div className="space-y-4">{(appData?.bankAccounts || []).map(b=>(<div key={b.id} className="bg-white p-4 rounded-xl shadow flex items-center gap-3"><Landmark className="text-blue-500"/><div><p className="font-bold">{b.bank}</p><p className="text-xs">{b.accountNumber}</p></div></div>))}<button className="w-full py-4 border-2 border-dashed border-slate-200 rounded-3xl font-black text-slate-300 transition-all">+ Tambah Rekening</button></div></div>}
           </div>
 
-          {/* BOTTOM NAVIGATION TETAP */}
+          {/* BOTTOM NAVIGATION */}
           <div className="w-full h-20 bg-white/90 backdrop-blur-md rounded-t-[30px] shadow-[0_-10px_25px_rgba(0,0,0,0.05)] flex justify-between items-end px-4 pb-2 z-50 border-t border-white shrink-0">
             {[
               { id: 'home', icon: <Home size={24}/>, label: 'HOME' },
@@ -466,34 +452,17 @@ const App = () => {
     );
   };
 
-  // --- GLOBAL MODALS ---
+  // --- MODALS ---
   const Modals = () => (
     <>
       {showSuccess && <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-max bg-slate-800/95 text-white px-6 py-4 rounded-full font-bold flex items-center gap-3 shadow-2xl z-[500] animate-pop-in"><CheckCircle2 className="text-emerald-400" size={20}/>{successMsg}</div>}
       
       {editBudgetModal.isOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[500] flex items-center justify-center p-5">
-           <div className="bg-white rounded-[40px] p-8 w-full max-w-sm animate-pop-in">
-              <h3 className="text-xl font-black text-slate-800 mb-2">Set Anggaran</h3>
-              <p className="text-[#20b2aa] font-bold mb-6 uppercase tracking-wider">{editBudgetModal.category}</p>
-              <input type="number" placeholder="Batas Nominal Rp" value={editBudgetModal.limit} onChange={e=>setEditBudgetModal({...editBudgetModal, limit:e.target.value})} className="w-full text-2xl font-black border-b-2 border-slate-100 outline-none mb-8 text-center text-slate-700"/>
-              <div className="flex gap-3">
-                 <button onClick={()=>setEditBudgetModal({isOpen:false,category:'',limit:''})} className="flex-1 py-4 bg-slate-100 rounded-2xl font-bold">Batal</button>
-                 <button onClick={async ()=>{setIsSubmitting(true); await updateFirestore({budgetLimits:{...appData.budgetLimits, [editBudgetModal.category]:parseInt(editBudgetModal.limit)}}); setIsSubmitting(false); setEditBudgetModal({isOpen:false,category:'',limit:''}); triggerSuccess('Batas Disimpan');}} className="flex-1 py-4 bg-[#20b2aa] text-white rounded-2xl font-black shadow-lg">Simpan</button>
-              </div>
-           </div>
-        </div>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[500] flex items-center justify-center p-5"><div className="bg-white rounded-[40px] p-8 w-full max-w-sm animate-pop-in"><h3 className="text-xl font-black text-slate-800 mb-2">Set Anggaran</h3><p className="text-[#20b2aa] font-bold mb-6 uppercase tracking-wider">{editBudgetModal.category}</p><input type="number" placeholder="Batas Nominal Rp" value={editBudgetModal.limit} onChange={e=>setEditBudgetModal({...editBudgetModal, limit:e.target.value})} className="w-full text-2xl font-black border-b-2 border-slate-100 outline-none mb-8 text-center text-slate-700"/><div className="flex gap-3"><button onClick={()=>setEditBudgetModal({isOpen:false,category:'',limit:''})} className="flex-1 py-4 bg-slate-100 rounded-2xl font-bold">Batal</button><button onClick={async ()=>{setIsSubmitting(true); await updateFirestore({budgetLimits:{...appData.budgetLimits, [editBudgetModal.category]:parseInt(editBudgetModal.limit)}}); setIsSubmitting(false); setEditBudgetModal({isOpen:false,category:'',limit:''}); triggerSuccess('Batas Disimpan');}} className="flex-1 py-4 bg-[#20b2aa] text-white rounded-2xl font-black shadow-lg">Simpan</button></div></div></div>
       )}
 
       {confirmModal.isOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[500] flex items-center justify-center p-5">
-           <div className="bg-white rounded-[45px] p-8 w-full max-w-sm animate-pop-in text-center shadow-2xl">
-              <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 ${confirmModal.isDanger ? 'bg-red-100 text-red-500 shadow-lg shadow-red-100' : 'bg-orange-100 text-orange-500 shadow-lg shadow-orange-100'}`}><AlertCircle size={40} /></div>
-              <h3 className="text-2xl font-black text-slate-800 mb-2">{confirmModal.title}</h3>
-              <p className="text-slate-400 mb-8 font-semibold text-sm leading-relaxed">{confirmModal.message}</p>
-              <div className="flex gap-4"><button onClick={() => setConfirmModal({isOpen: false})} className="flex-1 py-4 rounded-2xl bg-slate-50 text-slate-400 font-bold active:scale-95 transition-all">Batal</button><button onClick={confirmModal.onConfirm} className={`flex-1 py-4 rounded-2xl text-white font-black shadow-lg active:scale-95 transition-all ${confirmModal.isDanger ? 'bg-red-500 shadow-red-200' : 'bg-[#20b2aa] shadow-[#20b2aa]/20'}`}>Lanjutkan</button></div>
-           </div>
-        </div>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[500] flex items-center justify-center p-5"><div className="bg-white rounded-[45px] p-8 w-full max-w-sm animate-pop-in text-center shadow-2xl"><div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 ${confirmModal.isDanger ? 'bg-red-100 text-red-500 shadow-lg shadow-red-100' : 'bg-orange-100 text-orange-500 shadow-lg shadow-orange-100'}`}><AlertCircle size={40} /></div><h3 className="text-2xl font-black text-slate-800 mb-2">{confirmModal.title}</h3><p className="text-slate-400 mb-8 font-semibold text-sm leading-relaxed">{confirmModal.message}</p><div className="flex gap-4"><button onClick={() => setConfirmModal({isOpen: false})} className="flex-1 py-4 rounded-2xl bg-slate-50 text-slate-400 font-bold active:scale-95 transition-all">Batal</button><button onClick={confirmModal.onConfirm} className={`flex-1 py-4 rounded-2xl text-white font-black shadow-lg active:scale-95 transition-all ${confirmModal.isDanger ? 'bg-red-500 shadow-red-200' : 'bg-[#20b2aa] shadow-[#20b2aa]/20'}`}>Lanjutkan</button></div></div></div>
       )}
     </>
   );
